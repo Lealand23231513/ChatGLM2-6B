@@ -3,10 +3,11 @@
 # Usage: python openai_api.py
 # Visit http://localhost:8000/docs for documents.
 
-
+import os
 import time
 import torch
 import uvicorn
+import json
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -135,7 +136,7 @@ async def predict(query: str, history: List[List[str]], model_id: str):
         finish_reason=None
     )
     chunk = ChatCompletionResponse(model=model_id, choices=[choice_data], object="chat.completion.chunk")
-    yield "{}".format(chunk.json(exclude_unset=True, ensure_ascii=False))
+    yield json.dumps(chunk.model_dump(exclude_unset=True), ensure_ascii=False)
 
     current_length = 0
 
@@ -152,7 +153,7 @@ async def predict(query: str, history: List[List[str]], model_id: str):
             finish_reason=None
         )
         chunk = ChatCompletionResponse(model=model_id, choices=[choice_data], object="chat.completion.chunk")
-        yield "{}".format(chunk.json(exclude_unset=True, ensure_ascii=False))
+        yield json.dumps(chunk.model_dump(exclude_unset=True), ensure_ascii=False)
 
 
     choice_data = ChatCompletionResponseStreamChoice(
@@ -161,17 +162,16 @@ async def predict(query: str, history: List[List[str]], model_id: str):
         finish_reason="stop"
     )
     chunk = ChatCompletionResponse(model=model_id, choices=[choice_data], object="chat.completion.chunk")
-    yield "{}".format(chunk.json(exclude_unset=True, ensure_ascii=False))
+    yield json.dumps(chunk.model_dump(exclude_unset=True), ensure_ascii=False)
     yield '[DONE]'
 
 
 
 if __name__ == "__main__":
-    tokenizer = AutoTokenizer.from_pretrained("THUDM/chatglm2-6b", trust_remote_code=True)
-    model = AutoModel.from_pretrained("THUDM/chatglm2-6b", trust_remote_code=True).cuda()
+    tokenizer = AutoTokenizer.from_pretrained(os.path.normpath("C:/Users/15135/Documents/DCDYY/models/ChatGLM2-6B/chatglm2-6b-int4"), trust_remote_code=True)
+    model = AutoModel.from_pretrained(os.path.normpath("C:/Users/15135/Documents/DCDYY/models/ChatGLM2-6B/chatglm2-6b-int4"), trust_remote_code=True, device = 'cuda').eval()
     # 多显卡支持，使用下面两行代替上面一行，将num_gpus改为你实际的显卡数量
     # from utils import load_model_on_gpus
     # model = load_model_on_gpus("THUDM/chatglm2-6b", num_gpus=2)
-    model.eval()
 
     uvicorn.run(app, host='0.0.0.0', port=8000, workers=1)

@@ -1,17 +1,8 @@
-from transformers import AutoModel, AutoTokenizer
 import gradio as gr
 import mdtex2html
-from utils import load_model_on_gpus
-
-tokenizer = AutoTokenizer.from_pretrained("chatglm2-6b-int4", trust_remote_code=True)
-model = AutoModel.from_pretrained("chatglm2-6b-int4", trust_remote_code=True).cuda()
-# 多显卡支持，使用下面两行代替上面一行，将num_gpus改为你实际的显卡数量
-# from utils import load_model_on_gpus
-# model = load_model_on_gpus("THUDM/chatglm2-6b", num_gpus=2)
-model = model.eval()
+import openai
 
 """Override Chatbot.postprocess"""
-
 
 def postprocess(self, y):
     if y is None:
@@ -60,14 +51,24 @@ def parse_text(text):
     return text
 
 
-def predict(input, chatbot, max_length, top_p, temperature, history, past_key_values):
+def predict(input, chatbot, max_length, top_p, temperature, context:list):
     chatbot.append((parse_text(input), ""))
-    for response, history, past_key_values in model.stream_chat(tokenizer, input, history, past_key_values=past_key_values,
-                                                                return_past_key_values=True,
-                                                                max_length=max_length, top_p=top_p,
-                                                                temperature=temperature):
-        chatbot[-1] = (parse_text(input), parse_text(response))
-        yield chatbot, history, past_key_values
+    context.append({"role": "user", "content": f"{input}"})
+    assistant_response = ''
+    for chunk in openai.ChatCompletion.create(
+                                                model="chatglm2-6b",
+                                                messages=context,
+                                                temperature=temperature,
+                                                max_length=max_length,
+                                                top_p=top_p,
+                                                stream=True
+                                            ):
+        if hasattr(chunk.choices[0].delta, "content"):
+            assistant_response += chunk.choices[0].delta.content
+            chatbot[-1] = (parse_text(input), parse_text(assistant_response))
+            yield chatbot, context
+    context.append({'role':'assistant', 'content':f"{assistant_response}"})
+    return chatbot, context
 
 
 def reset_user_input():
@@ -75,8 +76,10 @@ def reset_user_input():
 
 
 def reset_state():
-    return [], [], None
+    return [], []
 
+openai.api_base = "http://localhost:8000/v1"
+openai.api_key = "none"
 
 with gr.Blocks() as demo:
     gr.HTML("""<h1 align="center">ChatGLM2-6B</h1>""")
@@ -85,8 +88,7 @@ with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column(scale=4):
             with gr.Column(scale=12):
-                user_input = gr.Textbox(show_label=False, placeholder="Input...", lines=10).style(
-                    container=False)
+                user_input = gr.Textbox(show_label=False, placeholder="Input...", lines=10, container=False)
             with gr.Column(min_width=32, scale=1):
                 submitBtn = gr.Button("Submit", variant="primary")
         with gr.Column(scale=1):
@@ -95,13 +97,12 @@ with gr.Blocks() as demo:
             top_p = gr.Slider(0, 1, value=0.8, step=0.01, label="Top P", interactive=True)
             temperature = gr.Slider(0, 1, value=0.95, step=0.01, label="Temperature", interactive=True)
 
-    history = gr.State([])
-    past_key_values = gr.State(None)
+    context = gr.State([])
 
-    submitBtn.click(predict, [user_input, chatbot, max_length, top_p, temperature, history, past_key_values],
-                    [chatbot, history, past_key_values], show_progress=True)
-    submitBtn.click(reset_user_input, [], [user_input])
+    submitBtn.click(predict, [user_input, chatbot, max_length, top_p, temperature, context],
+                    [chatbot, context], show_progress=True)
+    submitBtn.click(reset_user_input, outputs=[user_input])
 
-    emptyBtn.click(reset_state, outputs=[chatbot, history, past_key_values], show_progress=True)
+    emptyBtn.click(reset_state, outputs=[chatbot, context], show_progress=True)
 
 demo.queue().launch(share=False, inbrowser=True)
